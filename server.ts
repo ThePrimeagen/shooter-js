@@ -1,6 +1,6 @@
 import ws from "ws";
 import cli from "command-line-args";
-import { GameRunner, createGameRunner } from "./game";
+import { createGameRunner } from "./game";
 import * as consts from "./game/consts";
 
 const args = cli([{

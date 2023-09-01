@@ -12,7 +12,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@types/command-line-args": "^5.2.0",
     "@types/ws": "^8.5.5",
+    "command-line-args": "^5.2.1",
     "ws": "^8.13.0"
   },
   "devDependencies": {
