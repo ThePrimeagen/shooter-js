@@ -1,22 +1,13 @@
 import ws from "ws";
-import cli from "command-line-args";
 import { createGameRunner } from "./game";
 import * as consts from "./game/consts";
+import { getConfig } from "./cli";
+import { init } from "./logger";
 
-const args = cli([{
-    name: "port",
-    type: Number,
-    alias: "p",
-    defaultValue: 42069,
-}, {
-    name: "bulletSpeed",
-    type: Number,
-    alias: "b",
-    defaultValue: 500,
-}]);
-
+const args = getConfig();
 consts.initFromEnv();
 consts.initFromCLI(args);
+init(args);
 
 const server = new ws.Server({ port: args.port });
 const runner = createGameRunner();

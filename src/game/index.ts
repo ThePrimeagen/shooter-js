@@ -1,21 +1,34 @@
+import { getLogger } from "../logger";
 import WebSocket from "ws";
 import { Game } from "./game";
+import { writer } from "./data-writer";
 
 const FPS = 1000 / 60;
 
 function ticker(rate: number) {
     let next = Date.now() + rate;
+    let previousNow = 0;
+
     return async function() {
         const now = Date.now();
-        const flooredNext = Math.floor(next);
+        if (previousNow !== 0) {
+            writer.write("tickInterval", now - previousNow);
+        }
+        previousNow = now;
+
+        let flooredNext = Math.floor(next);
         const remaining = flooredNext - now;
 
         if (remaining > 0) {
             await new Promise(resolve => setTimeout(resolve, remaining));
         }
 
-        const extras = Date.now() - flooredNext;
+        const endNow = Date.now();
+        const extras = endNow - flooredNext;
+
         next = next + rate;
+
+        writer.write("tickRuntime", endNow - now);
 
         return extras + remaining;
     }
@@ -74,6 +87,7 @@ function onMessage(state: State) {
     }
 }
 
+let gamesPlayed = 0;
 async function playGame(p1: WebSocket, p2: WebSocket) {
     try {
         await Promise.all([waitForOpen(p1), waitForOpen(p2)]);
@@ -127,9 +141,7 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
     ] = game.gameStats();
 
     // no need to do anything, both somehow stopped
-    if (stopped1 && stopped2) {
-        return;
-    }
+    if (stopped1 && stopped2) { }
 
     else if (stopped1) {
         p2.send(JSON.stringify({
@@ -157,6 +169,11 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
             ...stats2,
         }));
     }
+
+    gamesPlayed++;
+    if (gamesPlayed % 100 == 0) {
+        getLogger().error(`Played ${gamesPlayed} games`);
+    }
 }
 
 export function createGameRunner() {
@@ -164,9 +181,11 @@ export function createGameRunner() {
     return function addPlayer(socket: WebSocket) {
         if (!waitingPlayer) {
             waitingPlayer = socket;
+            getLogger().info("Player 1 connected");
             return;
         }
 
+        getLogger().info("Player 2 connected");
         playGame(waitingPlayer, socket);
         waitingPlayer = undefined;
     };
