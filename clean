@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+rm /tmp/master
+rm /tmp/observation-1
+

@@ -17,6 +17,8 @@ function ticker(rate: number, writer: Writer) {
             writer.write("tickInterval", interval);
             if (interval > rate + 1) {
                 writer.count("tickIntervalOverrun");
+            } else if (interval > Math.floor(rate - 1)) {
+                writer.count("tickIntervalUnderrun");
             } else {
                 writer.count("tickOnTime");
             }

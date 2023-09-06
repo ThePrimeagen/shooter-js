@@ -26,6 +26,27 @@ func newChart(id int, title string) *Chart {
     }
 }
 
+func idxOf(labels []string, label string) int {
+    for i, l := range labels {
+        if l == label {
+            return i
+        }
+    }
+
+    return -1
+}
+
+
+func (c *Chart) addPoint(title string, value int, idx int) {
+    for len(c.Data) <= idx {
+        c.Data = append(c.Data, 0)
+        c.Labels = append(c.Labels, "")
+    }
+
+    c.Data[idx] = c.Data[idx] + value
+    c.Labels[idx] = title
+}
+
 func (c *Chart) addLine(line map[string]interface{}) {
     if title, ok := line["title"].(string); ok {
         if title != c.Title {
@@ -46,13 +67,7 @@ func (c *Chart) addLine(line map[string]interface{}) {
             }
 
             value := int(v64)
-            idx := -1
-            for i, label := range c.Labels {
-                if label == key {
-                    idx = i
-                    break
-                }
-            }
+            idx := idxOf(c.Labels, key)
 
             if idx == -1 {
                 c.Data = append(c.Data, value)
@@ -63,16 +78,6 @@ func (c *Chart) addLine(line map[string]interface{}) {
 
         }
     }
-}
-
-func idxOf(labels []string, label string) int {
-    for i, l := range labels {
-        if l == label {
-            return i
-        }
-    }
-
-    return -1
 }
 
 func (c *Chart) sortLabels() {
@@ -99,10 +104,20 @@ func (c *Chart) sortLabels() {
     c.Labels = labels
 }
 
+func (c *Chart) getTickTotal() int {
+    total := 0
+    for _, v := range c.Data {
+        total += v
+    }
+
+    return total
+}
+
 type Page struct {
     Charts []*Chart
     ErrorMsg string
     File string
+    TotalTicks int
 }
 
 func Index(c echo.Context) error {
@@ -127,7 +142,13 @@ func Index(c echo.Context) error {
     }
 
     chartData := make(map[string]*Chart)
-    id := 0
+    chartTickClassify := newChart(0, "Tick Classification")
+    titleIdx := map[string]int{
+        "tickOnTime": 0,
+        "tickIntervalOverrun": 1,
+        "tickIntervalUnderrun": 2,
+    }
+    id := 1
 
     // for each over each line
     // its a byte array, therefore we need to split on new line
@@ -141,10 +162,14 @@ func Index(c echo.Context) error {
         }
 
         title, ok := parsed["title"].(string)
-        _, ok2 := parsed["pointSet"].(map[string]interface{})
 
-        if !ok || !ok2 {
+        if !ok {
             c.Logger().Error("line doesn't contain title and pointSet", parsed)
+            continue
+        }
+
+        if title == "tickOnTime" || title == "tickIntervalOverrun" || title == "tickIntervalUnderrun" {
+            chartTickClassify.addPoint(title, int(parsed["count"].(float64)), titleIdx[title])
             continue
         }
 
@@ -159,8 +184,12 @@ func Index(c echo.Context) error {
     }
 
     charts := make([]*Chart, 0)
+    charts = append(charts, chartTickClassify)
+
+    totalTicks := 0
     for _, chart := range chartData {
         chart.sortLabels()
+        totalTicks += chart.getTickTotal()
         charts = append(charts, chart)
     }
     c.Logger().Error("charts", len(charts))
@@ -169,6 +198,7 @@ func Index(c echo.Context) error {
         ErrorMsg: "",
         Charts: charts,
         File: file,
+        TotalTicks: totalTicks,
     })
 }
 

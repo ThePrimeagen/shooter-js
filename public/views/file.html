@@ -7,6 +7,7 @@
 
 {{ block "file-display" . }}
     {{ if . }}
+        <p> TOTAL TICKS: {{ .TotalTicks }} </p>
         {{ if .Charts }}
             {{ range .Charts }}
                 {{ template "chart" . }}
