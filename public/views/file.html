@@ -10,6 +10,7 @@
         <p> TOTAL TICKS: {{ .TotalTicks }} </p>
         {{ if .Charts }}
             {{ range .Charts }}
+                {{ template "stats" .Stats }}
                 {{ template "chart" . }}
             {{ end }}
         {{ end }}
@@ -49,4 +50,20 @@ new Chart(ctx, {
 });
 }
 </script>
+{{ end }}
+
+{{ block "stats" . }}
+{{ if . }}
+<div>
+    <p>Stats:</p>
+    <p>5: {{.Q5}}</p>
+    <p>10: {{.Q10}}</p>
+    <p>25: {{.Q25}}</p>
+    <p>50: {{.Median}}</p>
+    <p>75: {{.Q75}}</p>
+    <p>90: {{.Q90}}</p>
+    <p>95: {{.Q95}}</p>
+    <p>Mean: {{.Mean}}</p>
+</div>
+{{ end }}
 {{ end }}

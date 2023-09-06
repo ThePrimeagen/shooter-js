@@ -3,6 +3,7 @@ package pages
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -15,6 +16,7 @@ type Chart struct {
     Title string
     Data []int
     Labels []string
+    Stats *Stats
 }
 
 func newChart(id int, title string) *Chart {
@@ -113,6 +115,62 @@ func (c *Chart) getTickTotal() int {
     return total
 }
 
+type Stats struct {
+    Q5 string
+    Q10 string
+    Q25 string
+    Mean float64
+    Median int
+    Q75 string
+    Q90 string
+    Q95 string
+}
+
+func getSummedValueQuantileIdx(data []int, quantilePosition int) int {
+    total := 0
+    fmt.Printf("quantilePosition: %d\n", quantilePosition)
+    for i, v := range data {
+        fmt.Printf("i: %d, v: %d, total: %d qPosition: %d\n", i, v, total, quantilePosition)
+        if quantilePosition > total && quantilePosition <= v + total {
+            return i
+        }
+
+        total += v
+    }
+
+    return -1
+}
+
+func (c *Chart) CalculateStats() {
+    total := c.getTickTotal()
+    q5 := getSummedValueQuantileIdx(c.Data, int(float64(total) * 0.05))
+    q10 := getSummedValueQuantileIdx(c.Data, int(float64(total) * 0.1))
+    q25 := getSummedValueQuantileIdx(c.Data, int(float64(total) * 0.25))
+    q75 := getSummedValueQuantileIdx(c.Data, int(float64(total) * 0.75))
+    q90 := getSummedValueQuantileIdx(c.Data, int(float64(total) * 0.9))
+    q95 := getSummedValueQuantileIdx(c.Data, int(float64(total) * 0.95))
+    median := getSummedValueQuantileIdx(c.Data, int(float64(total) * 0.5))
+
+    fmt.Printf("q10: %d, q25: %d, median: %d, q75: %d, q90: %d\n", q10, q25, median, q75, q90)
+
+    sum := 0
+    for i, v := range c.Data {
+        lbl, _ := strconv.Atoi(c.Labels[i])
+        sum += lbl * v
+    }
+
+    c.Stats = &Stats {
+        Q5: c.Labels[q5],
+        Q10: c.Labels[q10],
+        Q25: c.Labels[q25],
+        Mean: float64(sum) / float64(total),
+        Median: median,
+        Q75: c.Labels[q75],
+        Q90: c.Labels[q90],
+        Q95: c.Labels[q95],
+    }
+}
+
 type Page struct {
     Charts []*Chart
     ErrorMsg string
@@ -189,6 +247,7 @@ func Index(c echo.Context) error {
     totalTicks := 0
     for _, chart := range chartData {
         chart.sortLabels()
+        chart.CalculateStats()
         totalTicks += chart.getTickTotal()
         charts = append(charts, chart)
     }
