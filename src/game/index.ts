@@ -9,7 +9,7 @@ function ticker(rate: number, writer: Writer) {
     let next = Date.now() + rate;
     let previousNow = 0;
 
-    return async function tickRunner() {
+    return function tickRunner(cb: (delta: number) => void) {
         const now = Date.now();
         const interval = now - previousNow;
 
@@ -27,19 +27,18 @@ function ticker(rate: number, writer: Writer) {
         let flooredNext = Math.floor(next);
         const remaining = flooredNext - now;
 
-        if (remaining > 0) {
-            await new Promise(resolve => setTimeout(resolve, remaining));
-        }
+        setTimeout(function waiting() {
+            const endNow = Date.now();
+            const extras = endNow - flooredNext;
 
-        const endNow = Date.now();
-        const extras = endNow - flooredNext;
+            next = next + rate;
+            previousNow = now;
 
-        next = next + rate;
-        previousNow = now;
+            writer.write("tickRuntime", endNow - now);
 
-        writer.write("tickRuntime", endNow - now);
+            cb(extras + remaining);
+        }, remaining);
 
-        return extras + remaining;
     }
 }
 
@@ -151,48 +150,56 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
         s1.messages = [];
         s2.messages = [];
 
-    } while (!game.ended && !s1.close && !s2.close && !s1.error && !s2.error);
+        if (!game.ended && !s1.close && !s2.close && !s1.error && !s2.error) {
+            gameTicker(run);
+        } else {
+            finish();
+        }
+    }
+    gameTicker(run);
 
-    const stopped1 = s1.close || s1.error;
-    const stopped2 = s2.close || s2.error;
-    const [
+    function finish() {
+        const stopped1 = s1.close || s1.error;
+        const stopped2 = s2.close || s2.error;
+        const [
         stats1,
         stats2,
     ] = game.gameStats();
 
-    // no need to do anything, both somehow stopped
-    if (stopped1 && stopped2) { }
+        // no need to do anything, both somehow stopped
+        if (stopped1 && stopped2) { }
 
-    else if (stopped1) {
-        p2.send(JSON.stringify({
-            type: "stop",
-            errorMsg: "Opponent disconnected",
-            ...stats2,
-        }));
-    }
+        else if (stopped1) {
+            p2.send(JSON.stringify({
+                type: "stop",
+                errorMsg: "Opponent disconnected",
+                ...stats2,
+            }));
+        }
 
-    else if (stopped2) {
-        p1.send(JSON.stringify({
-            type: "stop",
-            errorMsg: "Opponent disconnected",
-            ...stats1,
-        }));
-    }
+        else if (stopped2) {
+            p1.send(JSON.stringify({
+                type: "stop",
+                errorMsg: "Opponent disconnected",
+                ...stats1,
+            }));
+        }
 
-    else {
-        p1.send(JSON.stringify({
-            type: "stop",
-            ...stats1,
-        }));
-        p2.send(JSON.stringify({
-            type: "stop",
-            ...stats2,
-        }));
-    }
+        else {
+            p1.send(JSON.stringify({
+                type: "stop",
+                ...stats1,
+            }));
+            p2.send(JSON.stringify({
+                type: "stop",
+                ...stats2,
+            }));
+        }
 
-    gamesPlayed++;
-    if (gamesPlayed % 100 == 0) {
-        getLogger().error(`Played ${gamesPlayed} games`);
+        gamesPlayed++;
+        if (gamesPlayed % 100 == 0) {
+            getLogger().error(`Played ${gamesPlayed} games`);
+        }
     }
 
     getWriter().count("games-played");
@@ -212,4 +219,3 @@ export function createGameRunner() {
         waitingPlayer = undefined;
     };
 }
-
