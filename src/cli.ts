@@ -15,6 +15,11 @@ const args = [{
     alias: "p",
     defaultValue: 42069,
 }, {
+    name: "reportInterval",
+    type: Number,
+    alias: "r",
+    defaultValue: 1000,
+}, {
     name: "bulletSpeed",
     type: Number,
     alias: "b",
@@ -26,6 +31,7 @@ export type Config = {
     logPath?: string;
     port: number;
     bulletSpeed: number;
+    reportInterval: number;
 }
 
 export function getConfig() {

@@ -10,8 +10,9 @@ export function getLogger(): Logger {
     return logger;
 }
 
-export function init(args: Config): Logger {
+export function initLogger(args: Config): Logger {
     let fileTransport: undefined | ReturnType<typeof pino.transport> = undefined;
+
     if (args.logPath) {
         fileTransport = pino.transport({
             target: 'pino/file',

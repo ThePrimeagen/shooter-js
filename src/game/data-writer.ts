@@ -1,19 +1,28 @@
+import { Config } from "../cli";
 import { getLogger } from "../logger";
 
 export class Writer {
     private data: Map<string, number[]>;
+    private counters: Map<string, number>;
     private lastTime: number;
 
     constructor(private reportIntervalMS: number = 1000) {
         this.data = new Map();
+        this.counters = new Map();
         this.lastTime = 0;
     }
 
-    write(title: string, data: number) {
-        if (this.lastTime === 0) {
-            this.lastTime = Date.now();
+    count(title: string) {
+        let count = this.counters.get(title);
+        if (!count) {
+            count = 0;
+            this.counters.set(title, count);
         }
+        this.counters.set(title, count + 1);
+        this.flush();
+    }
 
+    write(title: string, data: number) {
         let pointSet = this.data.get(title);
         if (!pointSet) {
             pointSet = [];
@@ -21,13 +30,19 @@ export class Writer {
         }
         pointSet.push(data);
 
-        if (this.lastTime + this.reportIntervalMS < Date.now()) {
-            this.lastTime = Date.now();
-            this.flush();
-        }
+        this.flush();
     }
 
     private async flush() {
+
+        if (this.lastTime === 0) {
+            this.lastTime = Date.now();
+        }
+
+        if (this.lastTime + this.reportIntervalMS > Date.now()) {
+            return;
+        }
+
         const points: Map<string, Map<number, number>> = new Map();
 
         for (const [title, data] of this.data.entries()) {
@@ -48,9 +63,28 @@ export class Writer {
         }
 
         this.data.clear();
+
+        for (const [title, count] of this.counters.entries()) {
+            getLogger().warn({ title, count });
+        }
+
+        this.counters.clear();
+        this.lastTime = Date.now();
     }
 
 }
 
-export const writer = new Writer();
+let writer: Writer | undefined = undefined;
+
+export function getWriter(args?: Config): Writer {
+    if (args) {
+        writer = new Writer(args.reportInterval);
+    }
+
+    if (!writer) {
+        throw new Error("No writer");
+    }
+
+    return writer;
+}
 

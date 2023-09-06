@@ -1,20 +1,26 @@
 import { getLogger } from "../logger";
 import WebSocket from "ws";
 import { Game } from "./game";
-import { writer } from "./data-writer";
+import { Writer, getWriter } from "./data-writer";
 
 const FPS = 1000 / 60;
 
-function ticker(rate: number) {
+function ticker(rate: number, writer: Writer) {
     let next = Date.now() + rate;
     let previousNow = 0;
 
-    return async function() {
+    return async function tickRunner() {
         const now = Date.now();
+        const interval = now - previousNow;
+
         if (previousNow !== 0) {
-            writer.write("tickInterval", now - previousNow);
+            writer.write("tickInterval", interval);
+            if (interval > rate + 1) {
+                writer.count("tickIntervalOverrun");
+            } else {
+                writer.count("tickOnTime");
+            }
         }
-        previousNow = now;
 
         let flooredNext = Math.floor(next);
         const remaining = flooredNext - now;
@@ -27,6 +33,7 @@ function ticker(rate: number) {
         const extras = endNow - flooredNext;
 
         next = next + rate;
+        previousNow = now;
 
         writer.write("tickRuntime", endNow - now);
 
@@ -35,7 +42,7 @@ function ticker(rate: number) {
 }
 
 async function waitForOpen(socket: WebSocket): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise(function waitForOpen(resolve, reject) {
         if (socket.readyState !== WebSocket.OPEN) {
             socket.once("open", resolve);
             socket.once("error", reject);
@@ -78,7 +85,7 @@ type Fire = {
 type Message = Stop | Start | Fire;
 
 function onMessage(state: State) {
-    return function(msg: string | Buffer) {
+    return function onMessage(msg: string | Buffer) {
         try {
             state.messages.push(JSON.parse(msg.toString()) as Message);
         } catch (e) {
@@ -108,7 +115,7 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
     p1.on("error", () => s1.error = true);
     p2.on("error", () => s2.error = true);
 
-    const gameTicker = ticker(FPS);
+    const gameTicker = ticker(FPS, getWriter());
     const game = new Game(100);
 
     do {

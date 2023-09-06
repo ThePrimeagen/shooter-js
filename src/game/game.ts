@@ -48,7 +48,6 @@ export class Game {
         this.s1 = createState(-1000, 1);
         this.s2 = createState(1000, -1);
         this.bullets = [];
-
         this.logger = getLogger().child({ bullets: this.bullets, id: id++ });
     }
 
