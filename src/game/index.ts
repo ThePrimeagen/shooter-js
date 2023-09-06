@@ -123,7 +123,10 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
     do {
         // state checking / clean up
 
-        game.update(await gameTicker());
+        let ticks = await gameTicker();
+        while (ticks-- > 0) {
+            game.update(1);
+        }
 
         for (const msg of s1.messages) {
             if (msg.type === "fire") {
