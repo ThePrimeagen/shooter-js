@@ -2,7 +2,7 @@ import { Config } from "../cli";
 import { getLogger } from "../logger";
 
 export class Writer {
-    private data: Map<string, number[]>;
+    private data: Map<string, Map<number, number>>;
     private counters: Map<string, number>;
     private lastTime: number;
 
@@ -25,10 +25,11 @@ export class Writer {
     write(title: string, data: number) {
         let pointSet = this.data.get(title);
         if (!pointSet) {
-            pointSet = [];
+            pointSet = new Map();
             this.data.set(title, pointSet);
         }
-        pointSet.push(data);
+
+        pointSet.set(data, (pointSet.get(data) ?? 0) + 1);
 
         this.flush();
     }
@@ -43,22 +44,7 @@ export class Writer {
             return;
         }
 
-        const points: Map<string, Map<number, number>> = new Map();
-
-        for (const [title, data] of this.data.entries()) {
-            let pointSet = points.get(title);
-            if (!pointSet) {
-                pointSet = new Map();
-                points.set(title, pointSet);
-            }
-
-            for (let i = 0; i < data.length; ++i) {
-                // @ts-ignore DON'T BE AFRAID TYPESCRIPT
-                pointSet.set(data[i], (pointSet.get(data[i]) | 0) + 1);
-            }
-        }
-
-        for (const [title, pointSet] of points.entries()) {
+        for (const [title, pointSet] of this.data.entries()) {
             getLogger().warn({ title, pointSet: Object.fromEntries(pointSet) });
         }
 
