@@ -167,7 +167,6 @@ async fn main() -> Result<()> {
         let permit = semaphore.clone().acquire_owned().await?;
 
         // helps prevent just a HUGE sloshing of games flying in at once
-        tokio::time::sleep(tokio::time::Duration::from_millis(15)).await;
         let (s1, s2) =
             futures_util::join!(connect_async(url.as_str()), connect_async(url.as_str()));
 
