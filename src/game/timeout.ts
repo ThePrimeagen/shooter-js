@@ -1,3 +1,4 @@
+import { getWriter } from "./data-writer";
 
 type Callback = () => void;
 
@@ -42,6 +43,7 @@ class Timeout {
                 // ensure that we don't block for too long
                 if (Date.now() - startTime > 2) {
                     this.lastProcessed -= 1;
+                    getWriter().count("timeout-loop-too-long");
                     break outer_loop;
                 }
 

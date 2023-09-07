@@ -34,7 +34,7 @@ export class Writer {
         this.flush();
     }
 
-    private async flush() {
+    private flush() {
 
         if (this.lastTime === 0) {
             this.lastTime = Date.now();
