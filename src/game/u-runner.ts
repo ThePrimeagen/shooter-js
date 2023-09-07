@@ -1,48 +1,11 @@
 import { getLogger } from "../logger";
-import WebSocket from "ws";
+import { WebSocket } from "uWebSockets.js";
 import { Game } from "./game";
-import { Writer, getWriter } from "./data-writer";
+import { getWriter } from "./data-writer";
 import { timeout } from "./timeout";
+import { ticker } from "./ticker";
 
 const FPS = 1000 / 60;
-
-function ticker(rate: number, writer: Writer) {
-    let next = Date.now() + rate;
-    let previousNow = 0;
-    return function getNextTick() {
-        const now = Date.now();
-        const interval = now - previousNow;
-
-        if (previousNow !== 0) {
-            writer.write("tickInterval", interval);
-            if (interval > rate + 1) {
-                writer.count("tickIntervalOverrun");
-            } else if (interval < Math.floor(rate - 1)) {
-                writer.count("tickIntervalUnderrun");
-            } else {
-                writer.count("tickOnTime");
-            }
-        }
-
-        let out = next;
-
-        next = next + rate;
-        previousNow = now;
-
-        return Math.floor(out);
-    };
-}
-
-async function waitForOpen(socket: WebSocket): Promise<void> {
-    return new Promise(function waitForOpen(resolve, reject) {
-        if (socket.readyState !== WebSocket.OPEN) {
-            socket.once("open", resolve);
-            socket.once("error", reject);
-        } else {
-            resolve();
-        }
-    });
-}
 
 type State = {
     messages: Message[],
@@ -76,9 +39,15 @@ type Fire = {
 
 type Message = Stop | Start | Fire;
 
-function onMessage(state: State) {
-    return function onMessage(msg: string | Buffer) {
+const onClose = new Map<WebSocket<any>, () => void>();
+const onMessage = new Map<WebSocket<any>, (msg: any) => void>();
+
+function processMessage(state: State) {
+    return function onMessage(msg: string | Buffer | ArrayBuffer) {
         try {
+            if (msg instanceof ArrayBuffer) {
+                msg = Buffer.from(msg);
+            }
             state.messages.push(JSON.parse(msg.toString()) as Message);
         } catch (e) {
             state.error = true;
@@ -87,12 +56,7 @@ function onMessage(state: State) {
 }
 
 let gamesPlayed = 0;
-export async function playGame(p1: WebSocket, p2: WebSocket) {
-    try {
-        await Promise.all([waitForOpen(p1), waitForOpen(p2)]);
-    } catch (e) {
-        // handle error
-    }
+export function playGame(p1: WebSocket<any>, p2: WebSocket<any>) {
 
     p1.send(JSON.stringify({ type: "start" }));
     p2.send(JSON.stringify({ type: "start" }));
@@ -100,12 +64,10 @@ export async function playGame(p1: WebSocket, p2: WebSocket) {
     const s1 = createState();
     const s2 = createState();
 
-    p1.on("message", onMessage(s1));
-    p2.on("message", onMessage(s2));
-    p1.on("close", () => s1.close = true);
-    p2.on("close", () => s2.close = true);
-    p1.on("error", () => s1.error = true);
-    p2.on("error", () => s2.error = true);
+    onMessage.set(p1, processMessage(s1));
+    onMessage.set(p2, processMessage(s2));
+    onClose.set(p1, () => s1.close = true);
+    onClose.set(p2, () => s2.close = true);
 
     const gameTicker = ticker(FPS, getWriter());
     const game = new Game(100);
@@ -199,3 +161,16 @@ export async function playGame(p1: WebSocket, p2: WebSocket) {
     getWriter().count("games-played");
 }
 
+export function receiveMessage(ws: WebSocket<any>, msg: any) {
+    const handler = onMessage.get(ws);
+    if (handler) {
+        handler(msg);
+    }
+}
+
+export function receiveClose(ws: WebSocket<any>) {
+    const handler = onClose.get(ws);
+    if (handler) {
+        handler();
+    }
+}
