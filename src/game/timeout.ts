@@ -36,6 +36,13 @@ class Timeout {
 
             for (const cb of callbacks) {
                 cb();
+
+                // ensure that we don't block for too long
+                if (Date.now() - startTime > 2) {
+                    this.lastProcessed -= 1;
+                    break;
+                }
+
             }
 
             this.timeouts.delete(this.lastProcessed);
