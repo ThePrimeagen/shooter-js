@@ -3,12 +3,14 @@ type Callback = () => void;
 
 class Timeout {
     private timeouts: Map<number, Callback[]>;
+    private timeoutsIdx: number;
     private lastProcessed: number;
     private boundRun: () => void;
     constructor() {
         this.timeouts = new Map();
         this.lastProcessed = Date.now();
         this.boundRun = this.run.bind(this);
+        this.timeoutsIdx = 0;
     }
 
     add(cb: Callback, when: number): void {
@@ -24,7 +26,7 @@ class Timeout {
     run() {
         const startTime = Date.now();
 
-        while (this.lastProcessed < startTime) {
+        outer_loop: while (this.lastProcessed < startTime) {
 
             // move forward
             this.lastProcessed += 1;
@@ -34,18 +36,19 @@ class Timeout {
                 continue;
             }
 
-            for (const cb of callbacks) {
-                cb();
+            for (; this.timeoutsIdx < callbacks.length; this.timeoutsIdx++) {
+                callbacks[this.timeoutsIdx]();
 
                 // ensure that we don't block for too long
                 if (Date.now() - startTime > 2) {
                     this.lastProcessed -= 1;
-                    break;
+                    break outer_loop;
                 }
 
             }
 
             this.timeouts.delete(this.lastProcessed);
+            this.timeoutsIdx = 0;
         }
 
         setTimeout(this.boundRun, 0);
