@@ -14,7 +14,11 @@ getWriter(args);
 const server = new ws.Server({ port: args.port });
 const runner = createGameRunner();
 
+let id = 0;
 server.on("connection", (socket) => {
+    // @ts-ignore
+    socket.MY_ID = ++id;
+
     runner(socket);
 });
 

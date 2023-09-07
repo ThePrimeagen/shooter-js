@@ -231,6 +231,10 @@ func Index(c echo.Context) error {
             continue
         }
 
+        if title == "gameTotal" {
+            continue
+        }
+
         chart, ok := chartData[title]
         if !ok {
             chart = newChart(id, title)

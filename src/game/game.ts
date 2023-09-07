@@ -42,13 +42,16 @@ export class Game {
 
     private bullets: Bullet[];
     private logger: Logger;
-    private loopCount: number = 0;
+    public loopCount: number = 0;
+
+    private startTime: number;
 
     constructor(private fireRateMS: number) {
         this.s1 = createState(-1000, 1);
         this.s2 = createState(1000, -1);
         this.bullets = [];
         this.logger = getLogger().child({ bullets: this.bullets, id: id++ });
+        this.startTime = Date.now();
     }
 
     update(delta: number) {

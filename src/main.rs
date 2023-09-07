@@ -1,10 +1,11 @@
-use std::sync::{Arc, atomic::AtomicUsize, Mutex};
+use std::sync::{atomic::AtomicUsize, Arc, Mutex};
 
-use futures_util::{stream::StreamExt, SinkExt};
 use anyhow::Result;
 use clap::Parser;
-use serde::{Serialize, Deserialize};
-use tokio::task::JoinHandle;
+use futures_util::{stream::StreamExt, SinkExt};
+use serde::{Deserialize, Serialize};
+use tokio::net::TcpStream;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
 
 // the tag is the type value
@@ -14,16 +15,23 @@ enum Message {
     #[serde(rename = "start")]
     Start,
     #[serde(rename = "stop")]
-    Stop { ticks: u32, bullets_fired: u32, won: bool, error_msg: Option<String> },
+    Stop {
+        ticks: u32,
+        bullets_fired: u32,
+        won: bool,
+        error_msg: Option<String>,
+    },
     #[serde(rename = "fire")]
     Fire,
     #[serde(rename = "error")]
     Error { msg: String },
+
+    #[serde(rename = "timeout")]
+    Timeout,
 }
 
 #[derive(Debug, Parser)]
 struct Config {
-
     #[clap(short, long, default_value_t = 42069)]
     port: usize,
 
@@ -37,9 +45,9 @@ struct Config {
     parallel: usize,
 }
 
-async fn create_client(url: &'static str, fire_wait: u64) -> Result<Option<Message>> {
-    let (stream, _) = tokio_tungstenite::connect_async(url).await?;
+type Stream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
+async fn run_client(stream: Stream, fire_wait: u64) -> Result<Option<Message>> {
     let (mut write, mut read) = stream.split();
 
     let msg = read.next().await;
@@ -48,8 +56,8 @@ async fn create_client(url: &'static str, fire_wait: u64) -> Result<Option<Messa
         match msg {
             Message::Fire | Message::Stop { .. } => {
                 return Err(anyhow::anyhow!("message received isn't start message"));
-            },
-            _ => {},
+            }
+            _ => {}
         }
     } else {
         return Err(anyhow::anyhow!("failed to read start message"));
@@ -57,7 +65,7 @@ async fn create_client(url: &'static str, fire_wait: u64) -> Result<Option<Messa
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(2);
 
-    tokio::spawn(async move {
+    let rx_loop = tokio::spawn(async move {
         loop {
             let msg = read.next().await;
             if let Some(Ok(msg)) = msg {
@@ -65,12 +73,16 @@ async fn create_client(url: &'static str, fire_wait: u64) -> Result<Option<Messa
                 let msg = match msg {
                     Ok(msg) => msg,
                     Err(e) => {
-                        tx.send(Message::Error { msg: format!("failed at parsing: {:?}", e) }).await;
+                        _ = tx
+                            .send(Message::Error {
+                                msg: format!("failed at parsing: {:?}", e),
+                            })
+                            .await;
                         break;
                     }
                 };
 
-                tx.send(msg).await;
+                _ = tx.send(msg).await;
             }
         }
     });
@@ -108,6 +120,8 @@ async fn create_client(url: &'static str, fire_wait: u64) -> Result<Option<Messa
         }
     }
 
+    rx_loop.abort();
+
     return Ok(stop);
 }
 
@@ -121,7 +135,13 @@ struct GameResult {
 
 impl GameResult {
     fn add(&mut self, msg: Message, player: usize) {
-        if let Message::Stop { ticks, bullets_fired, won, error_msg } = msg {
+        if let Message::Stop {
+            ticks,
+            bullets_fired,
+            won,
+            ..
+        } = msg
+        {
             self.ticks += ticks as usize;
             self.bullets_fired += bullets_fired as usize;
             if won && player == 1 {
@@ -140,24 +160,50 @@ async fn main() -> Result<()> {
     let fails = Arc::new(AtomicUsize::new(0));
     let game_results = Arc::new(Mutex::new(GameResult::default()));
     let mut handles = Vec::new();
+    let faster_player = 110;
+    let slower_player = 250;
 
     for i in 0..config.games {
         let permit = semaphore.clone().acquire_owned().await?;
 
         // helps prevent just a HUGE sloshing of games flying in at once
-        tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(15)).await;
+        let (s1, s2) =
+            futures_util::join!(connect_async(url.as_str()), connect_async(url.as_str()));
+
+        let s1 = match s1 {
+            Ok((s, _)) => s,
+            Err(e) => {
+                println!("failed to connect to server: {:?}", e);
+                continue;
+            }
+        };
+
+        let s2 = match s2 {
+            Ok((s, _)) => s,
+            Err(e) => {
+                println!("failed to connect to server: {:?}", e);
+                continue;
+            }
+        };
 
         let fails = fails.clone();
         let game_results = game_results.clone();
 
         let handle = tokio::spawn(async move {
             // client 1 should always win
-            let results = futures_util::join!(
-                create_client(url.as_str(), 110),
-                create_client(url.as_str(), 170)
-            );
+            let (s1, s2) =
+                futures_util::join!(run_client(s1, faster_player), run_client(s2, slower_player));
 
-            match results {
+            if let Ok(Some(Message::Timeout)) = s1 {
+                println!("player1 timed out");
+            }
+
+            if let Ok(Some(Message::Timeout)) = s2 {
+                println!("player2 timed out");
+            }
+
+            match (s1, s2) {
                 (Ok(Some(s1)), Ok(Some(s2))) => {
                     if let Ok(mut game_results) = game_results.lock() {
                         game_results.add(s1, 1);

@@ -119,31 +119,63 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
 
     const gameTicker = ticker(FPS, getWriter());
     const game = new Game(100);
+    let ticksTotal = 0;
+    let lastS1Message = Date.now();
+    let lastS2Message = Date.now();
+    let startTime = Date.now();
 
     do {
         // state checking / clean up
 
         let ticks = await gameTicker();
-        while (ticks-- > 0) {
-            game.update(1);
+        ticksTotal += ticks;
+        while (ticks > 0) {
+            if (ticks > 16) {
+                game.update(16);
+                ticks -= 16;
+            } else {
+                game.update(ticks);
+                ticks = 0;
+            }
         }
 
+        const now = Date.now();
         for (const msg of s1.messages) {
             if (msg.type === "fire") {
+                lastS1Message = now;
                 game.fire(1);
+            } else {
+                console.log("here?");
             }
         }
 
         for (const msg of s2.messages) {
             if (msg.type === "fire") {
+                lastS2Message = now;
                 game.fire(2);
+            } else {
+                console.log("here?");
             }
+        }
+
+        if (lastS1Message < now - 1000) {
+            console.log("player1 timed out");
+            s1.close = true;
+            break;
+        }
+
+        if (lastS2Message < now - 1000) {
+            console.log("player2 timed out");
+            s2.close = true;
+            break;
         }
 
         s1.messages = [];
         s2.messages = [];
 
     } while (!game.ended && !s1.close && !s2.close && !s1.error && !s2.error);
+
+    console.log(game.loopCount, gamesPlayed);
 
     const stopped1 = s1.close || s1.error;
     const stopped2 = s2.close || s2.error;
