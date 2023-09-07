@@ -120,18 +120,16 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
     const game = new Game(100);
     let ticksTotal = 0;
 
-    do {
-        // state checking / clean up
+    function run(deltaMS: number) {
 
-        let ticks = await gameTicker();
-        ticksTotal += ticks;
-        while (ticks > 0) {
-            if (ticks > 16) {
+        ticksTotal += deltaMS;
+        while (deltaMS > 0) {
+            if (deltaMS > 16) {
                 game.update(16);
-                ticks -= 16;
+                deltaMS -= 16;
             } else {
-                game.update(ticks);
-                ticks = 0;
+                game.update(deltaMS);
+                deltaMS = 0;
             }
         }
 
