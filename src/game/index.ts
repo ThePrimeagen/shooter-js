@@ -194,6 +194,8 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
     if (gamesPlayed % 100 == 0) {
         getLogger().error(`Played ${gamesPlayed} games`);
     }
+
+    getWriter().count("games-played");
 }
 
 export function createGameRunner() {

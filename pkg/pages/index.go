@@ -128,9 +128,7 @@ type Stats struct {
 
 func getSummedValueQuantileIdx(data []int, quantilePosition int) int {
     total := 0
-    fmt.Printf("quantilePosition: %d\n", quantilePosition)
     for i, v := range data {
-        fmt.Printf("i: %d, v: %d, total: %d qPosition: %d\n", i, v, total, quantilePosition)
         if quantilePosition > total && quantilePosition <= v + total {
             return i
         }
@@ -176,6 +174,7 @@ type Page struct {
     ErrorMsg string
     File string
     TotalTicks int
+    Counters map[string]int
 }
 
 func Index(c echo.Context) error {
@@ -206,6 +205,7 @@ func Index(c echo.Context) error {
         "tickIntervalOverrun": 1,
         "tickIntervalUnderrun": 2,
     }
+    counters := map[string]int{ }
     id := 1
 
     // for each over each line
@@ -220,18 +220,21 @@ func Index(c echo.Context) error {
         }
 
         title, ok := parsed["title"].(string)
-
         if !ok {
-            c.Logger().Error("line doesn't contain title and pointSet", parsed)
             continue
         }
 
-        if title == "tickOnTime" || title == "tickIntervalOverrun" || title == "tickIntervalUnderrun" {
-            chartTickClassify.addPoint(title, int(parsed["count"].(float64)), titleIdx[title])
-            continue
-        }
-
-        if title == "gameTotal" {
+        _, ok = parsed["pointSet"]
+        if !ok {
+            if _, ok := titleIdx[title]; ok {
+                chartTickClassify.addPoint(title, int(parsed["count"].(float64)), titleIdx[title])
+            } else {
+                if _, ok := counters[title]; !ok {
+                    counters[title] = int(parsed["count"].(float64))
+                } else {
+                    counters[title] += int(parsed["count"].(float64))
+                }
+            }
             continue
         }
 
@@ -262,6 +265,7 @@ func Index(c echo.Context) error {
         Charts: charts,
         File: file,
         TotalTicks: totalTicks,
+        Counters: counters,
     })
 }
 
