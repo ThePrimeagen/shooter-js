@@ -41,6 +41,15 @@ struct Config {
     #[clap(short, long, default_value_t = 10000)]
     games: usize,
 
+    #[clap(short, long, default_value_t = 110)]
+    fast: u64,
+
+    #[clap(short, long, default_value_t = 200)]
+    slow: u64,
+
+    #[clap(short, long, default_value_t = 2)]
+    time_between: u64,
+
     #[clap(short = 'q', long, default_value_t = 100)]
     parallel: usize,
 }
@@ -160,12 +169,12 @@ async fn main() -> Result<()> {
     let fails = Arc::new(AtomicUsize::new(0));
     let game_results = Arc::new(Mutex::new(GameResult::default()));
     let mut handles = Vec::new();
-    let faster_player = 110;
-    let slower_player = 250;
+    let faster_player = config.fast;
+    let slower_player = config.slow;
 
     for i in 0..config.games {
         let permit = semaphore.clone().acquire_owned().await?;
-        tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(config.time_between)).await;
 
         // helps prevent just a HUGE sloshing of games flying in at once
         let (s1, s2) =
