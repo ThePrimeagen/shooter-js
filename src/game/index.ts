@@ -2,14 +2,14 @@ import { getLogger } from "../logger";
 import WebSocket from "ws";
 import { Game } from "./game";
 import { Writer, getWriter } from "./data-writer";
+import { timeout } from "./timeout";
 
 const FPS = 1000 / 60;
 
 function ticker(rate: number, writer: Writer) {
     let next = Date.now() + rate;
     let previousNow = 0;
-
-    return function tickRunner(cb: (delta: number) => void) {
+    return function getNextTick() {
         const now = Date.now();
         const interval = now - previousNow;
 
@@ -24,22 +24,13 @@ function ticker(rate: number, writer: Writer) {
             }
         }
 
-        let flooredNext = Math.floor(next);
-        const remaining = flooredNext - now;
+        let out = next;
 
-        setTimeout(function waiting() {
-            const endNow = Date.now();
-            const extras = endNow - flooredNext;
+        next = next + rate;
+        previousNow = now;
 
-            next = next + rate;
-            previousNow = now;
-
-            writer.write("tickRuntime", endNow - now);
-
-            cb(extras + remaining);
-        }, remaining);
-
-    }
+        return Math.floor(out);
+    };
 }
 
 async function waitForOpen(socket: WebSocket): Promise<void> {
@@ -120,7 +111,11 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
     const game = new Game(100);
     let ticksTotal = 0;
 
-    function run(deltaMS: number) {
+    let lastNow = Date.now();
+    function run() {
+        const now = Date.now();
+        let deltaMS = now - lastNow;
+        lastNow = now;
 
         ticksTotal += deltaMS;
         while (deltaMS > 0) {
@@ -149,12 +144,13 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
         s2.messages = [];
 
         if (!game.ended && !s1.close && !s2.close && !s1.error && !s2.error) {
-            gameTicker(run);
+            const next = gameTicker();
+            timeout.add(run, next);
         } else {
             finish();
         }
     }
-    gameTicker(run);
+    run();
 
     function finish() {
         const stopped1 = s1.close || s1.error;
