@@ -165,6 +165,7 @@ async fn main() -> Result<()> {
 
     for i in 0..config.games {
         let permit = semaphore.clone().acquire_owned().await?;
+        tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
 
         // helps prevent just a HUGE sloshing of games flying in at once
         let (s1, s2) =
