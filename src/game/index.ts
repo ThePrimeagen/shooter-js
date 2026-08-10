@@ -1,19 +1,19 @@
 import { getLogger } from "../logger";
 import WebSocket from "ws";
-import { Game } from "./game";
+import { Game, PlayerState } from "./game";
 import { Writer, getWriter } from "./data-writer";
 
 const FPS = 1000 / 60;
 
-function ticker(rate: number, writer: Writer) {
+export function ticker(rate: number, writer: Writer) {
     let next = Date.now() + rate;
     let previousNow = 0;
 
     return async function tickRunner() {
         const now = Date.now();
-        const interval = now - previousNow;
 
         if (previousNow !== 0) {
+            const interval = now - previousNow;
             writer.write("tickInterval", interval);
             if (interval > rate + 1) {
                 writer.count("tickIntervalOverrun");
@@ -24,33 +24,68 @@ function ticker(rate: number, writer: Writer) {
             }
         }
 
-        let flooredNext = Math.floor(next);
+        const flooredNext = Math.floor(next);
         const remaining = flooredNext - now;
 
         if (remaining > 0) {
             await new Promise(resolve => setTimeout(resolve, remaining));
+        } else {
+            // Yield a macrotask when behind so Date.now() can advance and the
+            // event loop is not starved by a microtask busy-loop.
+            await new Promise(resolve => setImmediate(resolve));
         }
 
         const endNow = Date.now();
-        const extras = endNow - flooredNext;
+        const frameStart = previousNow === 0 ? now : previousNow;
+        const delta = Math.max(0, endNow - frameStart);
 
         next = next + rate;
-        previousNow = now;
+        if (next < endNow) {
+            next = endNow;
+        }
+
+        previousNow = endNow;
 
         writer.write("tickRuntime", endNow - now);
 
-        return extras + remaining;
+        return delta;
     }
 }
 
-async function waitForOpen(socket: WebSocket): Promise<void> {
+export async function waitForOpen(socket: WebSocket): Promise<void> {
+    if (socket.readyState === WebSocket.OPEN) {
+        return;
+    }
+
+    if (
+        socket.readyState === WebSocket.CLOSED ||
+        socket.readyState === WebSocket.CLOSING
+    ) {
+        throw new Error("socket is closed");
+    }
+
     return new Promise(function waitForOpen(resolve, reject) {
-        if (socket.readyState !== WebSocket.OPEN) {
-            socket.once("open", resolve);
-            socket.once("error", reject);
-        } else {
+        const onOpen = () => {
+            cleanup();
             resolve();
-        }
+        };
+        const onError = (err: Error) => {
+            cleanup();
+            reject(err);
+        };
+        const onClose = () => {
+            cleanup();
+            reject(new Error("socket closed before open"));
+        };
+        const cleanup = () => {
+            socket.off("open", onOpen);
+            socket.off("error", onError);
+            socket.off("close", onClose);
+        };
+
+        socket.once("open", onOpen);
+        socket.once("error", onError);
+        socket.once("close", onClose);
     });
 }
 
@@ -72,12 +107,12 @@ type Start = {
     type: "start"
 }
 
-type Stop = {
+export type Stop = {
     type: "stop",
     ticks: number,
-    bulletsFired: number,
+    bullets_fired: number,
     won: boolean,
-    errorMsg?: string,
+    error_msg?: string,
 }
 
 type Fire = {
@@ -85,6 +120,37 @@ type Fire = {
 }
 
 type Message = Stop | Start | Fire;
+
+export function buildStopMessage(
+    stats: PlayerState,
+    ticks: number,
+    errorMsg?: string,
+): Stop {
+    const msg: Stop = {
+        type: "stop",
+        ticks: Math.floor(ticks),
+        bullets_fired: stats.bulletCount,
+        won: stats.won,
+    };
+
+    if (errorMsg !== undefined) {
+        msg.error_msg = errorMsg;
+    }
+
+    return msg;
+}
+
+function safeSend(socket: WebSocket, payload: unknown) {
+    if (socket.readyState !== WebSocket.OPEN) {
+        return;
+    }
+
+    try {
+        socket.send(JSON.stringify(payload));
+    } catch (e) {
+        getLogger().error({ err: e }, "failed to send websocket message");
+    }
+}
 
 function onMessage(state: State) {
     return function onMessage(msg: string | Buffer) {
@@ -97,15 +163,13 @@ function onMessage(state: State) {
 }
 
 let gamesPlayed = 0;
-async function playGame(p1: WebSocket, p2: WebSocket) {
+export async function playGame(p1: WebSocket, p2: WebSocket) {
     try {
         await Promise.all([waitForOpen(p1), waitForOpen(p2)]);
     } catch (e) {
-        // handle error
+        getLogger().error({ err: e }, "failed to open player sockets");
+        return;
     }
-
-    p1.send(JSON.stringify({ type: "start" }));
-    p2.send(JSON.stringify({ type: "start" }));
 
     const s1 = createState();
     const s2 = createState();
@@ -116,6 +180,9 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
     p2.on("close", () => s2.close = true);
     p1.on("error", () => s1.error = true);
     p2.on("error", () => s2.error = true);
+
+    safeSend(p1, { type: "start" });
+    safeSend(p2, { type: "start" });
 
     const gameTicker = ticker(FPS, getWriter());
     const game = new Game(100);
@@ -160,34 +227,30 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
         stats2,
     ] = game.gameStats();
 
+    const ticks = game.loopCount > 0 ? game.loopCount : Math.floor(ticksTotal);
+
     // no need to do anything, both somehow stopped
     if (stopped1 && stopped2) { }
 
     else if (stopped1) {
-        p2.send(JSON.stringify({
-            type: "stop",
-            errorMsg: "Opponent disconnected",
-            ...stats2,
-        }));
+        safeSend(p2, buildStopMessage(
+            { ...stats2, won: true },
+            ticks,
+            "Opponent disconnected",
+        ));
     }
 
     else if (stopped2) {
-        p1.send(JSON.stringify({
-            type: "stop",
-            errorMsg: "Opponent disconnected",
-            ...stats1,
-        }));
+        safeSend(p1, buildStopMessage(
+            { ...stats1, won: true },
+            ticks,
+            "Opponent disconnected",
+        ));
     }
 
     else {
-        p1.send(JSON.stringify({
-            type: "stop",
-            ...stats1,
-        }));
-        p2.send(JSON.stringify({
-            type: "stop",
-            ...stats2,
-        }));
+        safeSend(p1, buildStopMessage(stats1, ticks));
+        safeSend(p2, buildStopMessage(stats2, ticks));
     }
 
     gamesPlayed++;
@@ -200,16 +263,27 @@ async function playGame(p1: WebSocket, p2: WebSocket) {
 
 export function createGameRunner() {
     let waitingPlayer: WebSocket | undefined = undefined;
+
+    function clearWaiting(socket: WebSocket) {
+        if (waitingPlayer === socket) {
+            waitingPlayer = undefined;
+        }
+    }
+
     return function addPlayer(socket: WebSocket) {
         if (!waitingPlayer) {
             waitingPlayer = socket;
+            socket.once("close", () => clearWaiting(socket));
+            socket.once("error", () => clearWaiting(socket));
             getLogger().info("Player 1 connected");
             return;
         }
 
         getLogger().info("Player 2 connected");
-        playGame(waitingPlayer, socket);
+        const p1 = waitingPlayer;
         waitingPlayer = undefined;
+        void playGame(p1, socket).catch((err) => {
+            getLogger().error({ err }, "playGame failed");
+        });
     };
 }
-
